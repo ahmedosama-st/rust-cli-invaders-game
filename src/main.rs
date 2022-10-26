@@ -1,7 +1,7 @@
 use std::{io, thread};
 use std::error::Error;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::{event, ExecutableCommand, terminal};
 use crossterm::cursor::{Hide, Show};
@@ -10,11 +10,14 @@ use crossterm::terminal::LeaveAlternateScreen;
 use rusty_audio::Audio;
 use terminal::EnterAlternateScreen;
 
-use crate::frame::new_frame;
+use crate::frame::{Drawable, new_frame};
+use crate::player::Player;
 
 mod render;
 mod frame;
 mod lib;
+mod player;
+mod shot;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut audio = Audio::new();
@@ -52,13 +55,26 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Game loop
+    let mut player = Player::new();
+    let mut instant = Instant::now();
+
     'gameloop: loop {
         // Per frame init
-        let curr_frame = new_frame();
+        let delta = instant.elapsed();
+        instant = Instant::now();
+        let mut curr_frame = new_frame();
 
+        // Input handling
         while event::poll(Duration::default())? {
             if let Event::Key(key_event) = event::read()? {
                 match key_event.code {
+                    KeyCode::Left => player.move_left(),
+                    KeyCode::Right => player.move_right(),
+                    KeyCode::Char(' ') | KeyCode::Enter => {
+                        if player.shoot() {
+                            audio.play("pew")
+                        }
+                    },
                     KeyCode::Esc | KeyCode::Char('q') => {
                         audio.play("lose");
                         break 'gameloop;
@@ -68,7 +84,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
+
+        // Updates
+        player.update(delta);
+
         // Draw and render
+        player.draw(&mut curr_frame);
         let _ = render_tx.send(curr_frame);
         thread::sleep(Duration::from_millis(1));
     }
